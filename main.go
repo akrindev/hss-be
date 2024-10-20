@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"encoding/json"
@@ -102,7 +102,7 @@ func jsonResponse(w http.ResponseWriter, code int, message string, data interfac
 	json.NewEncoder(w).Encode(response)
 }
 
-func main() {
+func handler() {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/v1/members/{id}", GetMember).Methods("GET")
 	r.HandleFunc("/api/v1/members", GetMembers).Methods("GET")
@@ -121,3 +121,6 @@ func main() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), h))
 }
 
+func main() {
+	handler()
+}
