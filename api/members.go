@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -31,24 +32,27 @@ type Member struct {
 
 var db *sql.DB
 
-func initDB() {
+func initDB() error {
 	connectionString := os.Getenv("DATABASE_URL")
 	if connectionString == "" {
-		log.Fatal("DATABASE_URL environment variable is not set")
+		return fmt.Errorf("DATABASE_URL environment variable is not set")
 	}
 
 	var err error
 	db, err = sql.Open("postgres", connectionString)
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("error opening database: %w", err)
 	}
 
 	err = db.Ping()
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("error pinging database: %w", err)
 	}
-	log.Println("Connected to database")
+
+	log.Println("Connected to the database successfully")
+	return nil
 }
+
 
 func GetMember(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
@@ -170,8 +174,13 @@ func jsonResponse(w http.ResponseWriter, code int, message string, data interfac
 
 // Handler function for Vercel
 func Handler(w http.ResponseWriter, r *http.Request) {
-	initDB()
+	err := initDB()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to initialize database: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
 
+	// Set up the router with the correct API paths
 	routes := mux.NewRouter()
 	routes.HandleFunc("/api/v1/members/{id}", GetMember).Methods("GET")
 	routes.HandleFunc("/api/v1/members", GetMembers).Methods("GET")
@@ -179,7 +188,9 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	routes.HandleFunc("/api/v1/members/{id}", UpdateMember).Methods("PUT")
 	routes.HandleFunc("/api/v1/members/{id}", DeleteMember).Methods("DELETE")
 
+	// Add CORS handling
 	h := handlers.CORS(handlers.AllowedOrigins([]string{"*"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE"}), handlers.AllowedHeaders([]string{"Content-Type"}))(routes)
 
+	// Serve the request
 	h.ServeHTTP(w, r)
 }
