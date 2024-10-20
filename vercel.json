@@ -2,15 +2,18 @@
   "version": 2,
   "builds": [
     {
-      "src": "main.go",
+      "src": "api/members.go",
       "use": "@vercel/go"
     }
   ],
   "routes": [
     {
-      "src": "/(.*)",
-      "dest": "main.go"
+      "src": "/api/v1/members",
+      "dest": "api/members.go"
+    },
+    {
+      "src": "/api/v1/members/(.*)",
+      "dest": "api/members.go"
     }
   ]
 }
-

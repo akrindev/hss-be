@@ -169,26 +169,18 @@ func jsonResponse(w http.ResponseWriter, code int, message string, data interfac
 	json.NewEncoder(w).Encode(response)
 }
 
-func handler() {
+// Handler function for Vercel
+func Handler(w http.ResponseWriter, r *http.Request) {
 	initDB()
-	r := mux.NewRouter()
-	r.HandleFunc("/api/v1/members/{id}", GetMember).Methods("GET")
-	r.HandleFunc("/api/v1/members", GetMembers).Methods("GET")
-	r.HandleFunc("/api/v1/members", CreateMember).Methods("POST")
-	r.HandleFunc("/api/v1/members/{id}", UpdateMember).Methods("PUT")
-	r.HandleFunc("/api/v1/members/{id}", DeleteMember).Methods("DELETE")
 
-	h := handlers.CORS(handlers.AllowedOrigins([]string{"*"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE"}), handlers.AllowedHeaders([]string{"Content-Type"}))(r)
+	routes := mux.NewRouter()
+	routes.HandleFunc("/api/v1/members/{id}", GetMember).Methods("GET")
+	routes.HandleFunc("/api/v1/members", GetMembers).Methods("GET")
+	routes.HandleFunc("/api/v1/members", CreateMember).Methods("POST")
+	routes.HandleFunc("/api/v1/members/{id}", UpdateMember).Methods("PUT")
+	routes.HandleFunc("/api/v1/members/{id}", DeleteMember).Methods("DELETE")
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	h := handlers.CORS(handlers.AllowedOrigins([]string{"*"}), handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE"}), handlers.AllowedHeaders([]string{"Content-Type"}))(routes)
 
-	log.Printf("Starting server on port %s", port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), h))
-}
-
-func main() {
-	handler()
+	h.ServeHTTP(w, r)
 }
