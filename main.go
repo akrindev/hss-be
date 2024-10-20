@@ -1,13 +1,15 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"github.com/gorilla/mux"
 	"os"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/handlers"
+	_ "github.com/lib/pq"
 )
 
 type Member struct {
@@ -28,24 +30,62 @@ type Member struct {
 	UpdatedAt   int64  `json:"updated_at"`
 }
 
-var members = make(map[string]Member)
+var db *sql.DB
+
+func initDB() {
+	connectionString := os.Getenv("DATABASE_URL")
+	if connectionString == "" {
+		log.Fatal("DATABASE_URL environment variable is not set")
+	}
+
+	var err error
+	db, err = sql.Open("postgres", connectionString)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Connected to database")
+}
 
 func GetMember(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	id := params["id"]
-	if member, ok := members[id]; ok {
-		jsonResponse(w, http.StatusOK, "success_ok", member)
+	var member Member
+	err := db.QueryRow(`SELECT * FROM members WHERE id = $1`, id).Scan(&member.ID, &member.Name, &member.Gender, &member.BirthPlace, &member.BirthDate, &member.Phone, &member.Kelurahan, &member.Kecamatan, &member.Job, &member.RT, &member.RW, &member.Address, &member.Status, &member.CreatedAt, &member.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+	jsonResponse(w, http.StatusOK, "success_ok", member)
 }
 
 func GetMembers(w http.ResponseWriter, r *http.Request) {
-	var memberList []Member
-	for _, member := range members {
-		memberList = append(memberList, member)
+	rows, err := db.Query(`SELECT * FROM members`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	jsonResponse(w, http.StatusOK, "success_ok", memberList)
+	defer rows.Close()
+
+	var members []Member
+	for rows.Next() {
+		var member Member
+		err := rows.Scan(&member.ID, &member.Name, &member.Gender, &member.BirthPlace, &member.BirthDate, &member.Phone, &member.Kelurahan, &member.Kecamatan, &member.Job, &member.RT, &member.RW, &member.Address, &member.Status, &member.CreatedAt, &member.UpdatedAt)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		members = append(members, member)
+	}
+	jsonResponse(w, http.StatusOK, "success_ok", members)
 }
 
 func CreateMember(w http.ResponseWriter, r *http.Request) {
@@ -55,14 +95,19 @@ func CreateMember(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	members[member.ID] = member
+
+	query := `INSERT INTO members (id, name, gender, birth_place, birth_date, phone, kelurahan, kecamatan, job, rt, rw, address, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+	_, err = db.Exec(query, member.ID, member.Name, member.Gender, member.BirthPlace, member.BirthDate, member.Phone, member.Kelurahan, member.Kecamatan, member.Job, member.RT, member.RW, member.Address, member.Status, member.CreatedAt, member.UpdatedAt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	jsonResponse(w, http.StatusCreated, "member_created", member)
 }
 
 func UpdateMember(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	id := params["id"]
-
 	var updatedMember Member
 	err := json.NewDecoder(r.Body).Decode(&updatedMember)
 	if err != nil {
@@ -70,25 +115,47 @@ func UpdateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, ok := members[id]; ok {
-		updatedMember.ID = id
-		members[id] = updatedMember
-		jsonResponse(w, http.StatusOK, "member_updated", updatedMember)
+	query := `UPDATE members SET name=$1, gender=$2, birth_place=$3, birth_date=$4, phone=$5, kelurahan=$6, kecamatan=$7, job=$8, rt=$9, rw=$10, address=$11, status=$12, created_at=$13, updated_at=$14 WHERE id=$15`
+	result, err := db.Exec(query, updatedMember.Name, updatedMember.Gender, updatedMember.BirthPlace, updatedMember.BirthDate, updatedMember.Phone, updatedMember.Kelurahan, updatedMember.Kecamatan, updatedMember.Job, updatedMember.RT, updatedMember.RW, updatedMember.Address, updatedMember.Status, updatedMember.CreatedAt, updatedMember.UpdatedAt, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+
+	numRows, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if numRows == 0 {
+		jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+		return
+	}
+	jsonResponse(w, http.StatusOK, "member_updated", updatedMember)
 }
 
 func DeleteMember(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	id := params["id"]
 
-	if _, ok := members[id]; ok {
-		delete(members, id)
-		jsonResponse(w, http.StatusOK, "member_deleted", nil)
+	result, err := db.Exec(`DELETE FROM members WHERE id = $1`, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+
+	numRows, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if numRows == 0 {
+		jsonResponse(w, http.StatusNotFound, "member_not_found", nil)
+		return
+	}
+	jsonResponse(w, http.StatusOK, "member_deleted", nil)
 }
 
 func jsonResponse(w http.ResponseWriter, code int, message string, data interface{}) {
@@ -103,6 +170,7 @@ func jsonResponse(w http.ResponseWriter, code int, message string, data interfac
 }
 
 func handler() {
+	initDB()
 	r := mux.NewRouter()
 	r.HandleFunc("/api/v1/members/{id}", GetMember).Methods("GET")
 	r.HandleFunc("/api/v1/members", GetMembers).Methods("GET")
